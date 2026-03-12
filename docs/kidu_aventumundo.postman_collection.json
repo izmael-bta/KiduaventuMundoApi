@@ -1,0 +1,47 @@
+﻿{
+  "info": {
+    "name": "kidu_aventumundo API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {"method": "GET", "url": "{{baseUrl}}/health"}
+    },
+    {
+      "name": "Create User",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "url": "{{baseUrl}}/users",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": 0,\n  \"name\": \"Ana\",\n  \"age\": 8,\n  \"nickname\": \"ana1\",\n  \"password_hash\": \"sha256_hash\",\n  \"avatar_id\": \"avatar_1\",\n  \"security_question\": \"pet\",\n  \"security_answer_hash\": \"sha256_ans\",\n  \"stars\": 0,\n  \"is_active\": true,\n  \"created_at\": \"\",\n  \"updated_at\": \"\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Login",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "url": "{{baseUrl}}/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nickname\": \"ana1\",\n  \"password_hash\": \"sha256_hash\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Get Levels",
+      "request": {"method": "GET", "url": "{{baseUrl}}/english/levels"}
+    },
+    {
+      "name": "Get Summary",
+      "request": {"method": "GET", "url": "{{baseUrl}}/users/1/progress/summary"}
+    }
+  ],
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:8080"}
+  ]
+}

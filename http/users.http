@@ -1,0 +1,21 @@
+﻿@baseUrl = http://localhost:8080
+
+### Register user
+POST {{baseUrl}}/users
+Content-Type: application/json
+
+{
+  "id": 0,
+  "name": "Ismael",
+  "age": 9,
+  "nickname": "kidu123",
+  "passwordHash": "1234",
+  "avatarId": "avatar_1",
+  "securityQuestion": "Color favorito",
+  "securityAnswerHash": "azul",
+  "stars": 0
+}
+
+### Get user by nickname
+GET {{baseUrl}}/users/kidu123
+Accept: application/json
