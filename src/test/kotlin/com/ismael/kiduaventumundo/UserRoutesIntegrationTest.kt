@@ -5,6 +5,7 @@ import com.ismael.kiduaventumundo.repository.UserRepository
 import com.ismael.kiduaventumundo.service.UserService
 import io.ktor.client.request.get
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -81,6 +82,39 @@ class UserRoutesIntegrationTest {
     }
 
     @Test
+    fun loginInvalidCredentialsReturnsCompatibleBody() = testApplication {
+        application { module(userServiceOverride = UserService(InMemoryUserRepository())) }
+
+        client.post("/users") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "id": 0,
+                  "name": "Isa",
+                  "age": 7,
+                  "nickname": "isa",
+                  "password_hash": "sha256_abc",
+                  "avatar_id": "avatar_1",
+                  "security_question": "q",
+                  "security_answer_hash": "a",
+                  "stars": 0,
+                  "is_active": true
+                }
+                """.trimIndent()
+            )
+        }
+
+        val loginResponse = client.post("/login") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"nickname":"isa","password_hash":"wrong"}""")
+        }
+
+        assertEquals(HttpStatusCode.OK, loginResponse.status)
+        assertTrue(loginResponse.bodyAsText().contains("\"success\":false"))
+    }
+
+    @Test
     fun getUserById() = testApplication {
         application { module(userServiceOverride = UserService(InMemoryUserRepository())) }
 
@@ -111,12 +145,48 @@ class UserRoutesIntegrationTest {
         assertEquals(HttpStatusCode.OK, response.status)
         assertTrue(response.bodyAsText().contains("\"id\":1"))
     }
+
+    @Test
+    fun sessionAndSummaryFlowStayCompatible() = testApplication {
+        application { module(userServiceOverride = UserService(InMemoryUserRepository())) }
+
+        client.post("/users") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "id": 0,
+                  "name": "Ana",
+                  "age": 8,
+                  "nickname": "ana",
+                  "password_hash": "pw",
+                  "avatar_id": "avatar_2",
+                  "security_question": "q",
+                  "security_answer_hash": "a",
+                  "stars": 0,
+                  "is_active": true
+                }
+                """.trimIndent()
+            )
+        }
+
+        val sessionResponse = client.put("/session") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"id":1,"user_id":1}""")
+        }
+        val summaryResponse = client.get("/users/1/progress/summary")
+
+        assertEquals(HttpStatusCode.OK, sessionResponse.status)
+        assertEquals(HttpStatusCode.OK, summaryResponse.status)
+        assertTrue(summaryResponse.bodyAsText().contains("\"user_id\":1"))
+    }
 }
 
 private class InMemoryUserRepository : UserRepository {
     private val users = mutableMapOf<Long, User>()
     private var sequence = 1L
     private var session = SessionRow(id = 1, user_id = null)
+    private val summaries = mutableMapOf<Long, UserProgressSummary>()
 
     override fun create(user: User): User {
         val created = user.copy(
@@ -125,6 +195,14 @@ private class InMemoryUserRepository : UserRepository {
             updated_at = "2026-03-08T00:00:00Z"
         )
         users[created.id] = created
+        summaries[created.id] = UserProgressSummary(
+            user_id = created.id,
+            total_stars = 0,
+            activities_completed = 0,
+            current_level = 1,
+            levels_unlocked = 0,
+            updated_at = "2026-03-08T00:00:00Z"
+        )
         return created
     }
 
@@ -176,5 +254,16 @@ private class InMemoryUserRepository : UserRepository {
 
     override fun getProgressEvents(userId: Long): List<ProgressEvent> = emptyList()
 
-    override fun getUserProgressSummary(userId: Long): UserProgressSummary? = null
+    override fun getUserProgressSummary(userId: Long): UserProgressSummary? = summaries[userId]
+
+    override fun recalculateUserProgressSummary(userId: Long): UserProgressSummary {
+        return summaries[userId] ?: UserProgressSummary(
+            user_id = userId,
+            total_stars = 0,
+            activities_completed = 0,
+            current_level = 1,
+            levels_unlocked = 0,
+            updated_at = "2026-03-08T00:00:00Z"
+        ).also { summaries[userId] = it }
+    }
 }

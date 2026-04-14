@@ -1,15 +1,31 @@
 ﻿# KiduAventuMundo API (Ktor + Kotlin/JVM)
 
+Documentacion de entrega disponible en [docs/DOCUMENTACION_ENTREGA.md](C:\Users\ismae\IdeaProjects\KiduaventuMundoApi\docs\DOCUMENTACION_ENTREGA.md).
+
 Backend nuevo e independiente, compatible con el contrato actual del frontend Android.
 
 ## Contrato compatible
 
 - `POST /users`
 - `GET /users/{nickname}`
+- `GET /users/id/{userId}`
+- `PUT /users/{userId}/avatar`
+- `PUT /users/{userId}/password`
 - `POST /login`
+- `GET /session`
+- `PUT /session`
+- `DELETE /session`
+- `GET /users/{userId}/progress/levels`
+- `GET /users/{userId}/progress/levels/{level}`
+- `PUT /users/{userId}/progress/levels/{level}`
+- `GET /users/{userId}/progress/levels/{level}/activities`
+- `PUT /users/{userId}/progress/levels/{level}/activities/{activityIndex}`
+- `POST /users/{userId}/progress/events`
+- `GET /users/{userId}/progress/events`
+- `GET /users/{userId}/progress/summary`
 - `GET /health`
 - Puerto por defecto: `8080`
-- JSON de `User` en camelCase exacto:
+- JSON de `User` en snake_case exacto:
 
 ```json
 {
@@ -17,11 +33,14 @@ Backend nuevo e independiente, compatible con el contrato actual del frontend An
   "name": "string",
   "age": 0,
   "nickname": "string",
-  "passwordHash": "string",
-  "avatarId": "avatar_1",
-  "securityQuestion": "string",
-  "securityAnswerHash": "string",
-  "stars": 0
+  "password_hash": "string",
+  "avatar_id": "avatar_1",
+  "security_question": "string",
+  "security_answer_hash": "string",
+  "stars": 0,
+  "is_active": true,
+  "created_at": "2026-04-14T00:00:00Z",
+  "updated_at": "2026-04-14T00:00:00Z"
 }
 ```
 
@@ -100,7 +119,6 @@ En Windows PowerShell:
 
 ### `POST /users`
 
-- Hashea en backend `passwordHash` y `securityAnswerHash` antes de guardar.
 - `201 Created` en éxito.
 - `409 Conflict` si `nickname` ya existe.
 - `400 Bad Request` si payload inválido.
@@ -113,11 +131,14 @@ Ejemplo respuesta éxito:
   "name": "Ismael",
   "age": 9,
   "nickname": "kidu123",
-  "passwordHash": "$2a$10$...",
-  "avatarId": "avatar_1",
-  "securityQuestion": "Color favorito",
-  "securityAnswerHash": "$2a$10$...",
-  "stars": 0
+  "password_hash": "sha256_hash",
+  "avatar_id": "avatar_1",
+  "security_question": "Color favorito",
+  "security_answer_hash": "sha256_hash",
+  "stars": 0,
+  "is_active": true,
+  "created_at": "2026-04-14T00:00:00Z",
+  "updated_at": "2026-04-14T00:00:00Z"
 }
 ```
 
@@ -133,19 +154,32 @@ Request:
 ```json
 {
   "nickname": "kidu123",
-  "password": "1234"
+  "password_hash": "1234"
 }
 ```
 
-- `200 OK` si credenciales correctas.
-- `401 Unauthorized` si incorrectas.
+- `200 OK` para credenciales válidas o inválidas; la respuesta indica `success`.
 
 Respuesta ejemplo:
 
 ```json
 {
   "success": true,
-  "message": "Login successful"
+  "user": {
+    "id": 1,
+    "name": "Ismael",
+    "age": 9,
+    "nickname": "kidu123",
+    "password_hash": "1234",
+    "avatar_id": "avatar_1",
+    "security_question": "Color favorito",
+    "security_answer_hash": "azul",
+    "stars": 0,
+    "is_active": true,
+    "created_at": "2026-04-14T00:00:00Z",
+    "updated_at": "2026-04-14T00:00:00Z"
+  },
+  "message": null
 }
 ```
 

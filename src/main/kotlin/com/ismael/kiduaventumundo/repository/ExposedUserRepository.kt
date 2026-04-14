@@ -1,14 +1,14 @@
-﻿package com.ismael.kiduaventumundo.repository
+package com.ismael.kiduaventumundo.repository
 
 import com.ismael.kiduaventumundo.db.*
+import com.ismael.kiduaventumundo.errors.NotFoundException
 import com.ismael.kiduaventumundo.model.*
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
-import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.update
 import java.time.Instant
 import java.time.LocalDateTime
@@ -25,14 +25,26 @@ class ExposedUserRepository : UserRepository {
             it[avatarId] = user.avatar_id
             it[securityQuestion] = user.security_question
             it[securityAnswerHash] = user.security_answer_hash
-            it[stars] = user.stars
+            it[stars] = 0
             it[isActive] = user.is_active
             it[createdAt] = now
             it[updatedAt] = now
         }
 
-        val idValue = inserted[UsersTable.id]
-        findById(idValue)!!
+        val userId = inserted[UsersTable.id]
+        upsertProgressSummaryRow(
+            UserProgressSummary(
+                user_id = userId,
+                total_stars = 0,
+                activities_completed = 0,
+                current_level = 1,
+                levels_unlocked = 0,
+                updated_at = now.toIsoUtcString()
+            ),
+            now
+        )
+
+        findById(userId)!!
     }
 
     override fun findByNickname(nickname: String): User? = dbQuery {
@@ -138,6 +150,7 @@ class ExposedUserRepository : UserRepository {
     }
 
     override fun getUserLevelProgress(userId: Long): List<UserLevelProgress> = dbQuery {
+        requireUser(userId)
         EnglishLevelProgressTable
             .selectAll()
             .where { EnglishLevelProgressTable.userId eq userId }
@@ -146,6 +159,8 @@ class ExposedUserRepository : UserRepository {
     }
 
     override fun getUserLevelProgress(userId: Long, level: Int): UserLevelProgress? = dbQuery {
+        requireUser(userId)
+        requireLevel(level)
         EnglishLevelProgressTable
             .selectAll()
             .where { (EnglishLevelProgressTable.userId eq userId) and (EnglishLevelProgressTable.level eq level) }
@@ -155,16 +170,19 @@ class ExposedUserRepository : UserRepository {
     }
 
     override fun upsertUserLevelProgress(progress: UserLevelProgress): UserLevelProgress = dbQuery {
+        requireUser(progress.user_id)
+        requireLevel(progress.level)
+
         val firstCompleted = parseNullableIsoUtc(progress.first_completed_at)
         val lastPlayed = parseNullableIsoUtc(progress.last_played_at)
 
-        val exists = EnglishLevelProgressTable
+        val existing = EnglishLevelProgressTable
             .selectAll()
             .where { (EnglishLevelProgressTable.userId eq progress.user_id) and (EnglishLevelProgressTable.level eq progress.level) }
             .limit(1)
             .singleOrNull()
 
-        if (exists == null) {
+        if (existing == null) {
             EnglishLevelProgressTable.insert {
                 it[userId] = progress.user_id
                 it[level] = progress.level
@@ -187,10 +205,13 @@ class ExposedUserRepository : UserRepository {
             }
         }
 
+        recalculateUserProgressSummaryInTransaction(progress.user_id)
         getUserLevelProgress(progress.user_id, progress.level)!!
     }
 
     override fun getUserActivityProgress(userId: Long, level: Int): List<UserActivityProgress> = dbQuery {
+        requireUser(userId)
+        requireLevel(level)
         EnglishActivityProgressTable
             .selectAll()
             .where { (EnglishActivityProgressTable.userId eq userId) and (EnglishActivityProgressTable.level eq level) }
@@ -199,9 +220,12 @@ class ExposedUserRepository : UserRepository {
     }
 
     override fun upsertUserActivityProgress(progress: UserActivityProgress): UserActivityProgress = dbQuery {
-        val lastPlayed = parseNullableIsoUtc(progress.last_played_at)
+        requireUser(progress.user_id)
+        requireLevel(progress.level)
+        requireActivity(progress.level, progress.activity_index)
 
-        val exists = EnglishActivityProgressTable
+        val lastPlayed = parseNullableIsoUtc(progress.last_played_at)
+        val existing = EnglishActivityProgressTable
             .selectAll()
             .where {
                 (EnglishActivityProgressTable.userId eq progress.user_id) and
@@ -211,7 +235,7 @@ class ExposedUserRepository : UserRepository {
             .limit(1)
             .singleOrNull()
 
-        if (exists == null) {
+        if (existing == null) {
             EnglishActivityProgressTable.insert {
                 it[userId] = progress.user_id
                 it[level] = progress.level
@@ -236,6 +260,9 @@ class ExposedUserRepository : UserRepository {
             }
         }
 
+        synchronizeLevelProgressFromActivities(progress.user_id, progress.level, lastPlayed)
+        recalculateUserProgressSummaryInTransaction(progress.user_id)
+
         EnglishActivityProgressTable
             .selectAll()
             .where {
@@ -249,6 +276,10 @@ class ExposedUserRepository : UserRepository {
     }
 
     override fun createProgressEvent(progressEvent: ProgressEvent): ProgressEvent = dbQuery {
+        requireUser(progressEvent.user_id)
+        requireLevel(progressEvent.level)
+        progressEvent.activity_index?.let { requireActivity(progressEvent.level, it) }
+
         val now = nowUtc()
         val inserted = ProgressEventsTable.insert {
             it[userId] = progressEvent.user_id
@@ -260,6 +291,8 @@ class ExposedUserRepository : UserRepository {
             it[createdAt] = now
         }
 
+        recalculateUserProgressSummaryInTransaction(progressEvent.user_id)
+
         val eventId = inserted[ProgressEventsTable.id]
         ProgressEventsTable
             .selectAll()
@@ -270,6 +303,7 @@ class ExposedUserRepository : UserRepository {
     }
 
     override fun getProgressEvents(userId: Long): List<ProgressEvent> = dbQuery {
+        requireUser(userId)
         ProgressEventsTable
             .selectAll()
             .where { ProgressEventsTable.userId eq userId }
@@ -278,12 +312,165 @@ class ExposedUserRepository : UserRepository {
     }
 
     override fun getUserProgressSummary(userId: Long): UserProgressSummary? = dbQuery {
+        requireUser(userId)
         UserProgressSummaryTable
             .selectAll()
             .where { UserProgressSummaryTable.userId eq userId }
             .limit(1)
             .map(::toUserProgressSummary)
             .singleOrNull()
+    }
+
+    override fun recalculateUserProgressSummary(userId: Long): UserProgressSummary = dbQuery {
+        requireUser(userId)
+        recalculateUserProgressSummaryInTransaction(userId)
+    }
+
+    private fun recalculateUserProgressSummaryInTransaction(userId: Long): UserProgressSummary {
+        val now = nowUtc()
+        val levelProgress = EnglishLevelProgressTable
+            .selectAll()
+            .where { EnglishLevelProgressTable.userId eq userId }
+            .map(::toUserLevelProgress)
+        val activityProgress = EnglishActivityProgressTable
+            .selectAll()
+            .where { EnglishActivityProgressTable.userId eq userId }
+            .map(::toUserActivityProgress)
+
+        val totalStars = levelProgress.sumOf { it.best_stars }
+        val activitiesCompleted = activityProgress.count { it.successes > 0 || it.stars > 0 || it.last_result == true }
+        val levelsUnlocked = levelProgress.count { it.is_unlocked }
+        val currentLevel = when {
+            levelProgress.isEmpty() -> 1
+            else -> levelProgress.filter { it.is_unlocked }.maxOfOrNull { it.level } ?: levelProgress.maxOf { it.level }
+        }
+
+        UsersTable.update({ UsersTable.id eq userId }) {
+            it[stars] = totalStars
+            it[updatedAt] = now
+        }
+
+        val summary = UserProgressSummary(
+            user_id = userId,
+            total_stars = totalStars,
+            activities_completed = activitiesCompleted,
+            current_level = currentLevel,
+            levels_unlocked = levelsUnlocked,
+            updated_at = now.toIsoUtcString()
+        )
+        upsertProgressSummaryRow(summary, now)
+        return summary
+    }
+
+    private fun upsertProgressSummaryRow(summary: UserProgressSummary, now: LocalDateTime) {
+        val existing = UserProgressSummaryTable
+            .selectAll()
+            .where { UserProgressSummaryTable.userId eq summary.user_id }
+            .limit(1)
+            .singleOrNull()
+
+        if (existing == null) {
+            UserProgressSummaryTable.insert {
+                it[userId] = summary.user_id
+                it[totalStars] = summary.total_stars
+                it[activitiesCompleted] = summary.activities_completed
+                it[currentLevel] = summary.current_level
+                it[levelsUnlocked] = summary.levels_unlocked
+                it[updatedAt] = now
+            }
+        } else {
+            UserProgressSummaryTable.update({ UserProgressSummaryTable.userId eq summary.user_id }) {
+                it[totalStars] = summary.total_stars
+                it[activitiesCompleted] = summary.activities_completed
+                it[currentLevel] = summary.current_level
+                it[levelsUnlocked] = summary.levels_unlocked
+                it[updatedAt] = now
+            }
+        }
+    }
+
+    private fun synchronizeLevelProgressFromActivities(userId: Long, level: Int, lastPlayed: LocalDateTime?) {
+        val levelRow = EnglishLevelsTable
+            .selectAll()
+            .where { EnglishLevelsTable.level eq level }
+            .limit(1)
+            .single()
+
+        val activities = EnglishActivityProgressTable
+            .selectAll()
+            .where {
+                (EnglishActivityProgressTable.userId eq userId) and
+                    (EnglishActivityProgressTable.level eq level)
+            }
+            .map(::toUserActivityProgress)
+
+        val aggregatedStars = activities.sumOf { it.stars }
+        val anyProgress = activities.any { it.attempts > 0 || it.successes > 0 || it.stars > 0 || it.last_result != null }
+        val shouldComplete = aggregatedStars >= levelRow[EnglishLevelsTable.passStars]
+        val existing = EnglishLevelProgressTable
+            .selectAll()
+            .where { (EnglishLevelProgressTable.userId eq userId) and (EnglishLevelProgressTable.level eq level) }
+            .limit(1)
+            .singleOrNull()
+
+        if (existing == null) {
+            EnglishLevelProgressTable.insert {
+                it[EnglishLevelProgressTable.userId] = userId
+                it[EnglishLevelProgressTable.level] = level
+                it[isUnlocked] = anyProgress || level == 1
+                it[isCompleted] = shouldComplete
+                it[bestStars] = aggregatedStars
+                it[firstCompletedAt] = if (shouldComplete) nowUtc() else null
+                it[lastPlayedAt] = lastPlayed
+            }
+            return
+        }
+
+        val mergedBestStars = maxOf(existing[EnglishLevelProgressTable.bestStars], aggregatedStars)
+        val mergedCompleted = existing[EnglishLevelProgressTable.isCompleted] || shouldComplete
+        val mergedFirstCompletedAt = existing[EnglishLevelProgressTable.firstCompletedAt]
+            ?: if (shouldComplete) nowUtc() else null
+        val mergedLastPlayedAt = lastPlayed ?: existing[EnglishLevelProgressTable.lastPlayedAt]
+
+        EnglishLevelProgressTable.update({
+            (EnglishLevelProgressTable.userId eq userId) and (EnglishLevelProgressTable.level eq level)
+        }) {
+            it[isUnlocked] = existing[EnglishLevelProgressTable.isUnlocked] || anyProgress || level == 1
+            it[isCompleted] = mergedCompleted
+            it[bestStars] = mergedBestStars
+            it[firstCompletedAt] = mergedFirstCompletedAt
+            it[lastPlayedAt] = mergedLastPlayedAt
+        }
+    }
+
+    private fun requireUser(userId: Long) {
+        val exists = UsersTable
+            .selectAll()
+            .where { UsersTable.id eq userId }
+            .limit(1)
+            .singleOrNull()
+        if (exists == null) throw NotFoundException("user not found")
+    }
+
+    private fun requireLevel(level: Int) {
+        val exists = EnglishLevelsTable
+            .selectAll()
+            .where { EnglishLevelsTable.level eq level }
+            .limit(1)
+            .singleOrNull()
+        if (exists == null) throw NotFoundException("level not found")
+    }
+
+    private fun requireActivity(level: Int, activityIndex: Int) {
+        val exists = EnglishActivitiesTable
+            .selectAll()
+            .where {
+                (EnglishActivitiesTable.level eq level) and
+                    (EnglishActivitiesTable.activityIndex eq activityIndex)
+            }
+            .limit(1)
+            .singleOrNull()
+        if (exists == null) throw NotFoundException("activity not found")
     }
 
     private fun toUser(row: ResultRow): User = User(

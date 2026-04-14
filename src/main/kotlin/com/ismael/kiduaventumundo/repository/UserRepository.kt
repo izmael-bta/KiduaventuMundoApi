@@ -27,4 +27,5 @@ interface UserRepository {
     fun getProgressEvents(userId: Long): List<ProgressEvent>
 
     fun getUserProgressSummary(userId: Long): UserProgressSummary?
+    fun recalculateUserProgressSummary(userId: Long): UserProgressSummary
 }

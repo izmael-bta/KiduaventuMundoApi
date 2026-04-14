@@ -14,8 +14,8 @@ data class User(
     val security_answer_hash: String = "",
     val stars: Int = 0,
     val is_active: Boolean = true,
-    val created_at: String = "",
-    val updated_at: String = ""
+    val created_at: String? = null,
+    val updated_at: String? = null
 )
 
 @Serializable
@@ -86,5 +86,5 @@ data class UserProgressSummary(
     val activities_completed: Int,
     val current_level: Int,
     val levels_unlocked: Int,
-    val updated_at: String
+    val updated_at: String? = null
 )

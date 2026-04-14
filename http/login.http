@@ -6,7 +6,7 @@ Content-Type: application/json
 
 {
   "nickname": "kidu123",
-  "password": "1234"
+  "password_hash": "1234"
 }
 
 ### Login failed
@@ -15,5 +15,5 @@ Content-Type: application/json
 
 {
   "nickname": "kidu123",
-  "password": "wrong"
+  "password_hash": "wrong"
 }

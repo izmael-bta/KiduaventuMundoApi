@@ -106,10 +106,10 @@ fun Application.registerRoutes(userService: UserService) {
             )
         }
 
-        put("/users/{userId}/progress/levels/{level}/activities/{activity_index}") {
+        put("/users/{userId}/progress/levels/{level}/activities/{activityIndex}") {
             val userId = call.longPathParam("userId")
             val level = call.intPathParam("level")
-            val activityIndex = call.intPathParam("activity_index")
+            val activityIndex = call.intPathParam("activityIndex")
             val body = call.receive<UserActivityProgress>()
             call.respond(HttpStatusCode.OK, userService.upsertActivityProgress(userId, level, activityIndex, body))
         }
